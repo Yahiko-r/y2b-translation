@@ -1,0 +1,9 @@
+name = "youtube-dialogue-writer"
+main = "src/index.ts"
+compatibility_date = "2026-05-28"
+
+[vars]
+GEMINI_MODEL = "gemini-2.5-flash"
+# Optional Webshare proxy vars can also be configured here or as secrets.
+# WEBSHARE_PROXY_HOST = "proxy.webshare.io"
+# WEBSHARE_PROXY_PORT = "80"
