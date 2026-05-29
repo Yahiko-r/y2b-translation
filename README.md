@@ -1,15 +1,10 @@
-# YouTube 对话文章生成器
+# YouTube 视频字幕文章生成器
 
-一个部署在 Cloudflare Workers 上的 Node.js / TypeScript 小应用：用户输入带字幕的 YouTube 链接，服务端获取字幕并调用 Gemini AI Studio API，流式生成中文视频对话内容文章。页面还支持按章节生成 5W1H 总结。
+部署地址：
 
-## 功能
+https://youtube-dialogue-writer.yahiko-xvc.workers.dev
 
-- 输入 YouTube 视频链接，自动解析 `videoId`
-- 优先获取 YouTube 字幕，失败时使用内置字幕兜底
-- 调用 Gemini `streamGenerateContent` 生成中文文章
-- 主文章通过 SSE 流式返回，前端实时展示
-- 可输入自然语言生成要求，影响文章任务、风格、受众和约束
-- 章节级 5W1H 总结，前端只提交 `sessionId` 和章节标题，不重新提交全文
+这是一个部署在 Cloudflare Workers 上的 Node.js / TypeScript 全栈小应用。用户输入带字幕的 YouTube 视频链接后，服务端获取字幕，调用 Gemini 流式生成中文内容稿，并支持按章节生成 5W1H 总结。
 
 ## 本地运行
 
@@ -19,119 +14,125 @@ cp .dev.vars.example .dev.vars
 npm run dev
 ```
 
-在 `.dev.vars` 中填入 Google AI Studio 的免费 Gemini API Key：
+`.dev.vars` 中需要配置：
 
 ```bash
-GEMINI_API_KEY="your-key"
+GEMINI_API_KEY="your-gemini-key"
 SUPADATA_API_KEY="your-supadata-key"
 ```
 
-如果需要用 webshare.io 代理获取 YouTube 字幕，可以继续配置：
+可选配置 Webshare 代理：
 
 ```bash
-WEBSHARE_PROXY_HOST="proxy.webshare.io"
-WEBSHARE_PROXY_PORT="80"
-WEBSHARE_PROXY_USERNAME="your-webshare-username"
-WEBSHARE_PROXY_PASSWORD="your-webshare-password"
+WEBSHARE_PROXY_HOSTS="ip1,ip2"
+WEBSHARE_PROXY_PORTS="port1,port2"
+WEBSHARE_PROXY_USERNAME="your-username"
+WEBSHARE_PROXY_PASSWORD="your-password"
 ```
 
-默认模型配置在 `wrangler.toml`：
-
-```toml
-GEMINI_MODEL = "gemini-2.5-flash"
-```
-
-## 部署
+部署：
 
 ```bash
-npx wrangler secret put GEMINI_API_KEY
-npx wrangler secret put SUPADATA_API_KEY
-npx wrangler secret put WEBSHARE_PROXY_USERNAME
-npx wrangler secret put WEBSHARE_PROXY_PASSWORD
+npm run typecheck
 npm run deploy
 ```
 
-部署完成后，Wrangler 会输出公开访问网址。
+当前默认模型和分块大小在 `wrangler.toml` 中配置：
+
+```toml
+GEMINI_MODEL = "gemini-3-flash-preview"
+TRANSLATION_CHUNK_CHARS = "6000"
+```
 
 ## 如何获取和处理 YouTube 字幕
 
-服务端在 `src/services/youtube.ts` 中完成字幕处理：
+字幕获取在 `src/services/youtube.ts` 中实现，采用多级兜底：
 
-1. 从用户输入的 YouTube URL 中解析 `videoId`。
-2. 优先直连 YouTube `timedtext` 和 watch page，尝试获取字幕轨道。
-3. 如果直连失败，调用 Supadata `GET /youtube/transcript/translate`，目标语言为 `zh`，获取中文字幕。
-4. 如果 Supadata 失败，再使用 Webshare TCP Socket 代理池重试 YouTube 字幕请求。
-5. 如果解析失败、没有字幕、请求被拦截或遇到验证码，则使用 `src/fixtures/transcript.ts` 中的硬编码字幕。
+1. 解析用户输入的 YouTube URL，提取 `videoId`。
+2. 优先直连 YouTube `timedtext` 接口获取字幕轨道。
+3. 如果 `timedtext` 没有结果，再解析 watch page 中的 `ytInitialPlayerResponse` 和 `captionTracks`。
+4. 如果 YouTube 触发验证码或没有返回字幕，调用 Supadata Universal Transcript API 获取结构化字幕。
+5. 如果 Supadata 也失败，再尝试通过 Webshare 代理请求 YouTube。
+6. 如果仍失败，并且视频是示例视频 `xRh2sVcNXQ8`，使用 `src/fixtures/downloaded-transcript.ts` 中预下载的完整字幕备份。
+7. 最后再兜底到 `src/fixtures/transcript.ts` 中的短版示例字幕，保证演示流程可用。
 
-YouTube 字幕获取本身不稳定，所以 fallback 是产品体验和演示稳定性的关键部分。
-
-Supadata 调用在 `src/services/supadata.ts`。它使用 `https://api.supadata.ai/v1` 作为 Base URL，并通过 `x-api-key` header 认证。当前项目使用免费计划可用的 Universal Transcript 接口，先请求中文已有字幕，失败后请求英文已有字幕。为了保留时间信息，项目请求结构化字幕片段：
+Supadata 请求使用结构化字幕格式：
 
 ```text
 GET /transcript?url={videoUrl}&lang=zh&text=false&chunkSize=1000&mode=native
-GET /transcript/{jobId}
 ```
 
-当 Supadata 返回 `content` 数组时，项目会保留每段字幕的 `text`、`offset`、`duration` 和 `lang`。长视频场景下，主文章 prompt 会优先按时间片段抽取代表性内容，避免把超长字幕一次性塞给 Gemini 导致首包延迟过高。
+如果中文字幕为空，会自动回退到英文字幕。返回的 `content` 数组会被标准化为 `TranscriptSegment[]`，保留 `text`、`startMs`、`durationMs` 和 `lang`。自动生成字幕不影响处理，只要接口能返回文本和时间片段，就按同样流程进入后续生成。
 
-如果遇到 YouTube 验证码，可以接入 webshare.io 等代理服务。Cloudflare Worker 的普通 `fetch` 不支持直接配置代理；当前项目在 `src/services/proxy.ts` 中使用 Cloudflare Workers TCP Socket `connect()` 连接 Webshare HTTP proxy，并在直接请求失败时自动通过代理重试 YouTube 字幕请求。
+为了避免第三方接口不稳定，项目提供了脚本预下载示例字幕：
 
-代理链路是可选增强：
+```bash
+npm run fixture:transcript
+```
 
-1. 未配置 `WEBSHARE_PROXY_*`：只使用 Worker 原生 `fetch`，失败后 fallback。
-2. 已配置 `WEBSHARE_PROXY_*`：原生 `fetch` 失败后，使用 TCP Socket 连接 Webshare 代理重试。
-3. 代理仍失败：继续 fallback 到内置字幕，保证主文章生成流程可用。
-
-注意：Webshare 的代理地址、端口、用户名、密码以控制台实际分配为准。部署到 Cloudflare 时，建议把用户名和密码配置为 secrets。
+该脚本会从 Supadata 下载示例视频字幕，并写入 `src/fixtures/downloaded-transcript.ts`，作为部署后的硬编码备份。
 
 ## 如何调用 Gemini 并实现流式输出
 
-Gemini 调用在 `src/services/gemini.ts`：
+Gemini 调用在 `src/services/gemini.ts` 中实现，没有使用 Node SDK，而是直接调用 REST API，适配 Cloudflare Worker runtime。
 
-- 主文章生成使用：
+主文章生成使用：
 
 ```text
 POST /v1beta/models/{model}:streamGenerateContent?alt=sse
 ```
 
-- Worker 读取 Gemini 返回的 SSE。
-- 每解析出一段文本，就写入自己的 `TransformStream`。
-- `/api/generate` 返回 `text/event-stream`。
-- 前端用 `fetch()` 和 `ReadableStream.getReader()` 逐块读取并实时渲染。
+实现流程：
 
-这样主文章不会等 Gemini 完整生成后才展示，满足“生成一点输出一点”的要求。
+1. Worker 创建 `TransformStream`，接口 `/api/generate` 返回 `text/event-stream`。
+2. 服务端向 Gemini 发起流式请求。
+3. Worker 解析 Gemini SSE 中每段增量文本。
+4. 每解析到一段文本，就通过自己的 SSE `chunk` 事件写给前端。
+5. 前端用 `fetch()` 读取 `ReadableStream`，实时把 Markdown 渲染成 HTML。
 
-## 用户生成要求如何影响输出
+长字幕不会一次性塞给模型。服务端会按字幕片段和字符预算切块，默认每块约 `6000` 字符。每个块就是一个章节：Gemini 在该块流式输出中生成 `## 章节标题` 和若干 `### 小标题`，正文根据视频形态自然组织。如果是访谈，会保留说话人；如果是演讲、教程或独白，则使用自然段落。
 
-用户在页面输入的自然语言要求会进入 `buildArticlePrompt()`：
+翻译和 5W1H 请求都关闭了 `thinkingBudget`，减少不必要的推理延迟，更适合“字幕翻译 + 内容整理”这类任务。
 
-- 任务类型：例如“写成深度分析”或“写成播客纪要”
-- 输出风格：例如“克制、商业化、口语化”
-- 目标受众：例如“写给非技术管理者”
-- 约束条件：例如“重点讲商业模式，不要太技术”
+## 如何根据用户生成要求影响输出结果
 
-Prompt 会要求模型在不违背字幕事实的前提下尽量体现这些约束。
+页面提供一个可选的“生成要求”输入框。用户可以输入自然语言约束，例如：
 
-## 章节级 5W1H 总结
+- 任务类型：字幕翻译稿、对话整理稿、面向汇报的内容稿
+- 输出风格：克制、口语化、商业分析、适合阅读
+- 目标受众：非技术管理者、投资人、产品经理
+- 约束条件：重点解释商业模式，不要过度技术化，不要添加外部信息
 
-生成主文章时，服务端会创建一个内存 session，保存：
+这些要求会进入主生成 prompt 和每个字幕分块 prompt。模型会在不违背字幕事实、不省略当前字幕块的前提下尽量满足用户要求。
+
+这里的取舍是：用户要求只影响表达方式和组织方式，不允许覆盖字幕事实。也就是说，用户可以要求“写给非技术管理者”，但模型不能因此编造字幕里没有的信息。
+
+## 如何实现章节级 5W1H 总结
+
+章节级 5W1H 在 `src/routes/summary.ts`、`src/services/session.ts` 和前端页面中配合实现。
+
+主文章生成时，服务端会创建一个 session，并保存：
 
 - `sessionId`
 - `videoId`
-- 原始字幕
+- 原始字幕全文
+- 字幕片段
 - 用户生成要求
 - 已生成文章内容
+- 每个章节的 `sectionId`、标题、原字幕、译文和时间范围
 
-前端点击章节标题旁的 `5W1H` 按钮时，只提交：
+每个字幕块生成完成后，服务端解析该块中的 `## 章节标题`，创建一个 section，并通过 SSE `section` 事件把 `sectionId` 发给前端。前端只在有 `sectionId` 的章节标题旁显示 `5W1H` 按钮。
+
+点击按钮时，前端只提交：
 
 ```json
 {
   "sessionId": "...",
-  "sectionTitle": "..."
+  "sectionId": "section-1"
 }
 ```
 
-服务端通过 `sessionId` 找回本次生成上下文，再调用 Gemini 普通 `generateContent`，要求只返回固定 JSON：
+前端不会重新提交整篇文章。服务端通过 `sessionId + sectionId` 找回整篇视频上下文和当前章节上下文，再调用 Gemini 普通 `generateContent`，要求返回固定 JSON：
 
 ```json
 {
@@ -144,15 +145,40 @@ Prompt 会要求模型在不违背字幕事实的前提下尽量体现这些约�
 }
 ```
 
-前端固定格式渲染 Who / What / When / Where / Why / How。
+前端按固定格式渲染 Who / What / When / Where / Why / How。
 
-当前版本用 Worker 内存 Map 保存 session，适合演示和笔试提交。生产化可以替换为 Cloudflare KV、D1 或 Durable Object。
+当前 session 存储使用 Worker 内存 `Map`，适合笔试演示。生产环境可替换为 Cloudflare KV、D1 或 Durable Object。
 
-## 工程取舍和亮点
+## 主要工程取舍和亮点
 
-- 单 Worker 全栈实现，部署路径短，评审者可以快速理解。
-- 不引入前端框架，页面交互用原生 Web API，减少构建复杂度。
-- Gemini 使用 REST API，不依赖 Node SDK，天然适配 Worker runtime。
-- YouTube 字幕真实获取和硬编码 fallback 并存，兼顾完整性和演示稳定性。
-- 主文章生成严格流式输出，前端实时渲染。
-- 5W1H 总结基于服务端 session，不让前端重复提交整篇文章。
+- **优先保证完整翻译闭环**：早期方案考虑过先抽取代表片段生成概览，但会遗漏长视频内容。最终改为按字幕片段完整切块翻译。
+- **章节标题由模型生成，但不额外请求模型**：每个 chunk 的第一行就是 `## 章节标题`，避免“先规划章节、再翻译正文”的额外延迟。
+- **主文章严格流式输出**：Gemini 生成一点，Worker 就通过 SSE 返回一点，前端实时渲染。
+- **5W1H 不让前端重传全文**：章节上下文保存在服务端 session 中，前端只提交 `sectionId`。
+- **多级字幕兜底**：YouTube 直连、Supadata、Webshare 代理、预下载字幕、短版内置字幕依次兜底，降低演示失败概率。
+- **Cloudflare Worker 友好**：Gemini 使用 REST API；代理使用 Worker TCP Socket；整体不依赖 Node-only runtime。
+- **控制长文本风险**：通过 `TRANSLATION_CHUNK_CHARS` 控制分块大小，降低首包延迟和模型失败率。
+- **实现保持轻量**：前端不引入框架，服务端模块按 `routes`、`services`、`fixtures` 拆分，便于评审快速阅读。
+
+## 目录结构
+
+```text
+src/
+  index.ts                 Worker 入口和路由分发
+  routes/
+    generate.ts            主文章流式生成接口
+    summary.ts             章节 5W1H 接口
+  services/
+    youtube.ts             YouTube/Supadata/代理字幕获取
+    supadata.ts            Supadata API 封装
+    proxy.ts               Webshare TCP Socket 代理请求
+    gemini.ts              Gemini REST 和 SSE 解析
+    prompt.ts              主生成和 5W1H prompt
+    transcript.ts          字幕片段标准化和分块
+    session.ts             服务端生成上下文保存
+  fixtures/
+    transcript.ts          短版内置字幕
+    downloaded-transcript.ts 示例视频完整字幕备份
+  ui/
+    home.ts                单页前端 HTML/CSS/JS
+```

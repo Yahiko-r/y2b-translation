@@ -5,11 +5,34 @@ export type TranscriptSegment = {
   lang?: string;
 };
 
+export type TranscriptChunk = {
+  index: number;
+  startMs?: number;
+  endMs?: number;
+  text: string;
+  segments: TranscriptSegment[];
+};
+
 export function segmentsToText(segments: TranscriptSegment[]) {
   return segments
     .map((segment) => segment.text.trim())
     .filter(Boolean)
     .join("\n");
+}
+
+export function buildTranscriptChunks(input: {
+  transcript: string;
+  segments?: TranscriptSegment[];
+  maxChars?: number;
+}): TranscriptChunk[] {
+  const maxChars = input.maxChars ?? 7000;
+  if (input.segments?.length) return chunkSegments(input.segments, maxChars);
+  return chunkText(input.transcript, maxChars);
+}
+
+export function formatTimeRange(chunk: Pick<TranscriptChunk, "startMs" | "endMs">) {
+  if (chunk.startMs === undefined) return "";
+  return `${formatTime(chunk.startMs)}-${formatTime(chunk.endMs ?? chunk.startMs)}`;
 }
 
 export function formatSegmentsForPrompt(segments: TranscriptSegment[], maxChars: number) {
@@ -103,7 +126,71 @@ function fitChunks(chunks: SegmentChunk[], maxChars: number) {
   return result;
 }
 
-function formatTime(ms: number) {
+function chunkSegments(segments: TranscriptSegment[], maxChars: number) {
+  const chunks: TranscriptChunk[] = [];
+  let current: TranscriptSegment[] = [];
+  let currentChars = 0;
+
+  const flush = () => {
+    if (current.length === 0) return;
+    const startMs = current.find((segment) => segment.startMs !== undefined)?.startMs;
+    const lastWithTime = [...current].reverse().find((segment) => segment.startMs !== undefined);
+    const endMs = lastWithTime?.startMs === undefined
+      ? undefined
+      : lastWithTime.startMs + (lastWithTime.durationMs ?? 0);
+
+    chunks.push({
+      index: chunks.length,
+      startMs,
+      endMs,
+      segments: current,
+      text: segmentsToText(current)
+    });
+    current = [];
+    currentChars = 0;
+  };
+
+  for (const segment of segments) {
+    const text = segment.text.trim();
+    if (!text) continue;
+    if (current.length > 0 && currentChars + text.length > maxChars) flush();
+    current.push(segment);
+    currentChars += text.length;
+  }
+
+  flush();
+  return chunks;
+}
+
+function chunkText(transcript: string, maxChars: number) {
+  const lines = transcript.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+  const chunks: TranscriptChunk[] = [];
+  let current: string[] = [];
+  let currentChars = 0;
+
+  const flush = () => {
+    if (current.length === 0) return;
+    const text = current.join("\n");
+    chunks.push({
+      index: chunks.length,
+      text,
+      segments: [{ text }]
+    });
+    current = [];
+    currentChars = 0;
+  };
+
+  for (const line of lines) {
+    if (current.length > 0 && currentChars + line.length > maxChars) flush();
+    current.push(line);
+    currentChars += line.length;
+  }
+
+  flush();
+  return chunks;
+}
+
+export function formatTime(ms: number) {
   const totalSeconds = Math.floor(ms / 1000);
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);

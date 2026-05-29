@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 
 const env = loadDotEnv(".dev.vars");
 const apiKey = env.GEMINI_API_KEY;
-const model = env.GEMINI_MODEL || "gemini-2.0-flash";
+const model = env.GEMINI_MODEL || "gemini-3-flash-preview";
 
 if (!apiKey) {
   console.error("Missing GEMINI_API_KEY in .dev.vars");
@@ -28,7 +28,12 @@ try {
           role: "user",
           parts: [{ text: "hello, reply with one short sentence" }]
         }
-      ]
+      ],
+      generationConfig: {
+        thinkingConfig: {
+          thinkingBudget: 0
+        }
+      }
     }),
     signal: AbortSignal.timeout(20000)
   });
