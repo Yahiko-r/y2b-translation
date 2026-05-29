@@ -1,5 +1,10 @@
 import { FALLBACK_TRANSCRIPT, FALLBACK_VIDEO_URL } from "../fixtures/transcript";
 import {
+  DOWNLOADED_TRANSCRIPT_SEGMENTS,
+  DOWNLOADED_TRANSCRIPT_TEXT,
+  DOWNLOADED_TRANSCRIPT_VIDEO_ID
+} from "../fixtures/downloaded-transcript";
+import {
   fetchTextViaWebshareProxy,
   hasWebshareProxy,
   type ProxyEnv,
@@ -467,6 +472,31 @@ function decodeEntities(value: string) {
 }
 
 function fallback(videoId: string | null, message: string): TranscriptResult {
+  if (
+    videoId &&
+    videoId === DOWNLOADED_TRANSCRIPT_VIDEO_ID &&
+    DOWNLOADED_TRANSCRIPT_TEXT.trim()
+  ) {
+    console.log(
+      "[fallback] using downloaded transcript fixture:",
+      videoId,
+      "chars:",
+      DOWNLOADED_TRANSCRIPT_TEXT.length,
+      "segments:",
+      DOWNLOADED_TRANSCRIPT_SEGMENTS.length
+    );
+
+    return {
+      source: "fallback",
+      videoId,
+      transcript: DOWNLOADED_TRANSCRIPT_TEXT,
+      segments: DOWNLOADED_TRANSCRIPT_SEGMENTS,
+      message: `${message} 已使用 Supadata 预下载硬编码字幕：${FALLBACK_VIDEO_URL}`
+    };
+  }
+
+  console.log("[fallback] using short built-in sample transcript");
+
   return {
     source: "fallback",
     videoId,

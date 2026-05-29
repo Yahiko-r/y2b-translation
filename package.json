@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
+    "fixture:transcript": "node scripts/download-fixture-transcript.mjs",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

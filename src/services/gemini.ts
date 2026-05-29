@@ -8,6 +8,7 @@ export type Env = {
   WEBSHARE_PROXY_USERNAME?: string;
   WEBSHARE_PROXY_PASSWORD?: string;
   SUPADATA_API_KEY?: string;
+  TRANSLATION_CHUNK_CHARS?: string;
 };
 
 type GeminiChunk = {
@@ -24,7 +25,7 @@ export async function streamGeminiText(env: Env, prompt: string) {
   const apiKey = env.GEMINI_API_KEY;
   if (!apiKey) throw new Error("GEMINI_API_KEY is not configured");
 
-  const model = env.GEMINI_MODEL || "gemini-2.5-flash";
+  const model = env.GEMINI_MODEL || "gemini-3-flash-preview";
   const url =
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse`;
 
@@ -42,8 +43,11 @@ export async function streamGeminiText(env: Env, prompt: string) {
         }
       ],
       generationConfig: {
-        temperature: 0.7,
-        topP: 0.9
+        temperature: 0.35,
+        topP: 0.9,
+        thinkingConfig: {
+          thinkingBudget: 0
+        }
       }
     })
   });
@@ -60,7 +64,7 @@ export async function generateGeminiJson<T>(env: Env, prompt: string): Promise<T
   const apiKey = env.GEMINI_API_KEY;
   if (!apiKey) throw new Error("GEMINI_API_KEY is not configured");
 
-  const model = env.GEMINI_MODEL || "gemini-2.5-flash";
+  const model = env.GEMINI_MODEL || "gemini-3-flash-preview";
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
     {
@@ -73,7 +77,10 @@ export async function generateGeminiJson<T>(env: Env, prompt: string): Promise<T
         contents: [{ role: "user", parts: [{ text: prompt }] }],
         generationConfig: {
           temperature: 0.2,
-          responseMimeType: "application/json"
+          responseMimeType: "application/json",
+          thinkingConfig: {
+            thinkingBudget: 0
+          }
         }
       })
     }
@@ -205,6 +212,8 @@ function extractText(chunk: GeminiChunk) {
 
 function logEmptyGeminiChunk(chunk: GeminiChunk) {
   const candidate = chunk.candidates?.[0];
+  if (candidate?.finishReason === "STOP" && !chunk.promptFeedback) return;
+
   console.warn(
     "[gemini] empty chunk:",
     `candidates=${chunk.candidates?.length ?? 0}`,

@@ -170,6 +170,12 @@ export function renderHome() {
       border-top: 0;
     }
 
+    .article h3 {
+      margin: 24px 0 8px;
+      font-size: 18px;
+      line-height: 1.35;
+    }
+
     .summary-button {
       min-height: 28px;
       padding: 0 9px;
@@ -290,12 +296,16 @@ export function renderHome() {
     let markdown = "";
     let sessionId = "";
     let done = false;
+    let sections = [];
+    let summaries = {};
 
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       markdown = "";
       sessionId = "";
       done = false;
+      sections = [];
+      summaries = {};
       articleEl.innerHTML = "";
       setStatus("正在获取字幕并连接 Gemini...");
       submit.disabled = true;
@@ -324,8 +334,10 @@ export function renderHome() {
     });
 
     articleEl.addEventListener("click", async (event) => {
-      const button = event.target.closest("[data-summary-title]");
-      if (!button || !sessionId || !done) return;
+      const button = event.target.closest("[data-summary-id]");
+      if (!button || !sessionId) return;
+      const sectionId = button.dataset.summaryId;
+      if (!sectionId) return;
       const title = button.dataset.summaryTitle;
       button.disabled = true;
       button.textContent = "生成中";
@@ -334,11 +346,12 @@ export function renderHome() {
         const response = await fetch("/api/summary", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ sessionId, sectionTitle: title })
+          body: JSON.stringify({ sessionId, sectionId, sectionTitle: title })
         });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || "5W1H 生成失败");
-        renderSummary(button.closest("h2"), data);
+        summaries[sectionId] = data;
+        articleEl.innerHTML = renderMarkdown(markdown, true);
         button.textContent = "5W1H";
       } catch (error) {
         setStatus(error.message || String(error), true);
@@ -378,7 +391,16 @@ export function renderHome() {
 
       if (event === "chunk") {
         markdown += data.text;
-        articleEl.innerHTML = renderMarkdown(markdown, false);
+        articleEl.innerHTML = renderMarkdown(markdown, true);
+      }
+
+      if (event === "section") {
+        sections[data.order] = data;
+        articleEl.innerHTML = renderMarkdown(markdown, true);
+      }
+
+      if (event === "progress") {
+        setStatus(data.message);
       }
 
       if (event === "done") {
@@ -396,6 +418,7 @@ export function renderHome() {
       const lines = source.split(/\\r?\\n/);
       let html = "";
       let inList = false;
+      let headingIndex = 0;
 
       const closeList = () => {
         if (inList) {
@@ -414,10 +437,21 @@ export function renderHome() {
         if (line.startsWith("## ")) {
           closeList();
           const title = line.slice(3).trim();
-          const button = includeButtons
-            ? '<button class="summary-button" data-summary-title="' + escapeAttr(title) + '" type="button">5W1H</button>'
+          const section = sections[headingIndex] || {};
+          const button = includeButtons && section.id
+            ? '<button class="summary-button" data-summary-id="' + escapeAttr(section.id || "") + '" data-summary-title="' + escapeAttr(section.title || title) + '" type="button">5W1H</button>'
             : "";
           html += "<h2><span>" + inline(title) + "</span>" + button + "</h2>";
+          if (section.id && summaries[section.id]) {
+            html += renderSummaryHtml(summaries[section.id]);
+          }
+          headingIndex += 1;
+          continue;
+        }
+
+        if (line.startsWith("### ")) {
+          closeList();
+          html += "<h3>" + inline(line.slice(4)) + "</h3>";
           continue;
         }
 
@@ -444,21 +478,15 @@ export function renderHome() {
       return html;
     }
 
-    function renderSummary(heading, data) {
-      const existing = heading.nextElementSibling?.classList.contains("summary")
-        ? heading.nextElementSibling
-        : null;
-      const target = existing || document.createElement("div");
-      target.className = "summary";
-      target.innerHTML = [
+    function renderSummaryHtml(data) {
+      return '<div class="summary">' + [
         ["Who", data.who],
         ["What", data.what],
         ["When", data.when],
         ["Where", data.where],
         ["Why", data.why],
         ["How", data.how]
-      ].map(([label, value]) => "<div><strong>" + label + "</strong><span>" + escapeHtml(value || "未提及") + "</span></div>").join("");
-      if (!existing) heading.insertAdjacentElement("afterend", target);
+      ].map(([label, value]) => "<div><strong>" + label + "</strong><span>" + escapeHtml(value || "未提及") + "</span></div>").join("") + '</div>';
     }
 
     function inline(value) {
