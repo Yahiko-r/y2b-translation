@@ -32,12 +32,7 @@ npm run typecheck
 npm run deploy
 ```
 
-当前默认模型和分块大小在 `wrangler.toml` 中配置：
 
-```toml
-GEMINI_MODEL = "gemini-3-flash-preview"
-TRANSLATION_CHUNK_CHARS = "6000"
-```
 
 ## 如何获取和处理 YouTube 字幕
 
