@@ -1,10 +1,5 @@
 # YouTube 视频字幕文章生成器
 
-部署地址：
-
-https://youtube-dialogue-writer.yahiko-xvc.workers.dev
-
-这是一个部署在 Cloudflare Workers 上的 Node.js / TypeScript 全栈小应用。用户输入带字幕的 YouTube 视频链接后，服务端获取字幕，调用 Gemini 流式生成中文内容稿，并支持按章节生成 5W1H 总结。
 
 ## 本地运行
 
