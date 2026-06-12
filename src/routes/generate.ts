@@ -24,7 +24,18 @@ export async function handleGenerate(request: Request, env: Env) {
   const videoUrl = payload?.videoUrl?.trim();
   if (!videoUrl) return json({ error: "请输入 YouTube 视频链接。" }, { status: 400 });
 
-  const transcript = await getTranscript(videoUrl, env);
+  let transcript;
+  try {
+    transcript = await getTranscript(videoUrl, env);
+  } catch (error) {
+    console.warn("[generate] transcript fetch failed:", error instanceof Error ? error.message : String(error));
+  }
+
+  if (!transcript) {
+    return json({
+      error: "字幕获取失败：YouTube 直连和第三方字幕接口均不可用，请稍后重试或更换视频。"
+    }, { status: 502 });
+  }
   console.log(
     "[generate] transcript ready:",
     `source=${transcript.source}`,
