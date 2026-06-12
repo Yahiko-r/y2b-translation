@@ -1,11 +1,2 @@
 GEMINI_API_KEY="paste-your-google-ai-studio-key"
 SUPADATA_API_KEY="paste-your-supadata-key"
-
-# Optional: Webshare HTTP proxy for YouTube caption fetching.
-WEBSHARE_PROXY_HOST="proxy.webshare.io"
-WEBSHARE_PROXY_PORT="80"
-# Optional: try multiple direct proxies in order.
-# WEBSHARE_PROXY_HOSTS="38.154.203.95,198.105.121.200"
-# WEBSHARE_PROXY_PORTS="5863,6462"
-WEBSHARE_PROXY_USERNAME="paste-your-webshare-username"
-WEBSHARE_PROXY_PASSWORD="paste-your-webshare-password"

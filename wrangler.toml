@@ -6,6 +6,3 @@ compatibility_date = "2026-05-28"
 GEMINI_MODEL = "gemini-3-flash-preview"
 # Smaller chunks give faster first output and more focused generated headings.
 TRANSLATION_CHUNK_CHARS = "6000"
-# Optional Webshare proxy vars can also be configured here or as secrets.
-# WEBSHARE_PROXY_HOST = "proxy.webshare.io"
-# WEBSHARE_PROXY_PORT = "80"

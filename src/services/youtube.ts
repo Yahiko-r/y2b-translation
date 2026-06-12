@@ -1,20 +1,8 @@
-import { FALLBACK_TRANSCRIPT, FALLBACK_VIDEO_URL } from "../fixtures/transcript";
-import {
-  DOWNLOADED_TRANSCRIPT_SEGMENTS,
-  DOWNLOADED_TRANSCRIPT_TEXT,
-  DOWNLOADED_TRANSCRIPT_VIDEO_ID
-} from "../fixtures/downloaded-transcript";
-import {
-  fetchTextViaWebshareProxy,
-  hasWebshareProxy,
-  type ProxyEnv,
-  type ProxyTextResponse
-} from "./proxy";
 import { fetchSupadataChineseTranscript, type SupadataEnv } from "./supadata";
 import type { TranscriptSegment } from "./transcript";
 
 export type TranscriptResult = {
-  source: "youtube" | "supadata" | "fallback";
+  source: "youtube" | "supadata";
   videoId: string | null;
   transcript: string;
   segments?: TranscriptSegment[];
@@ -36,17 +24,15 @@ export function extractVideoId(input: string): string | null {
   }
 }
 
-type TranscriptEnv = ProxyEnv & SupadataEnv;
-
-export async function getTranscript(videoUrl: string, env?: TranscriptEnv): Promise<TranscriptResult> {
+export async function getTranscript(videoUrl: string, env?: SupadataEnv): Promise<TranscriptResult> {
   const videoId = extractVideoId(videoUrl);
   console.log("[youtube] input url:", videoUrl);
   console.log("[youtube] parsed videoId:", videoId ?? "(none)");
 
-  if (!videoId) return fallback(null, "无法识别 YouTube videoId，已使用内置示例字幕。");
+  if (!videoId) throw new Error("无法识别 YouTube videoId。");
 
   try {
-    const transcript = await fetchYoutubeTranscript(videoId, undefined);
+    const transcript = await fetchYoutubeTranscript(videoId);
     console.log("[youtube] transcript fetched successfully, chars:", transcript.length);
     return {
       source: "youtube",
@@ -69,39 +55,26 @@ export async function getTranscript(videoUrl: string, env?: TranscriptEnv): Prom
     };
   } catch (error) {
     console.warn("[supadata] transcript fetch failed:", stringifyError(error));
-  }
-
-  try {
-    const transcript = await fetchYoutubeTranscript(videoId, env);
-    console.log("[youtube] proxy transcript fetched successfully, chars:", transcript.length);
-    return {
-      source: "youtube",
-      videoId,
-      transcript,
-      message: "直连与 Supadata 获取失败，已通过代理获取 YouTube 字幕。"
-    };
-  } catch (error) {
-    console.warn("[youtube] proxy transcript fetch failed:", stringifyError(error));
-    return fallback(videoId, `YouTube/Supadata 字幕获取失败，已使用内置示例字幕。原因：${stringifyError(error)}`);
+    throw new Error(`YouTube 直连与 Supadata 字幕获取均失败：${stringifyError(error)}`);
   }
 }
 
-async function fetchYoutubeTranscript(videoId: string, env?: ProxyEnv) {
+async function fetchYoutubeTranscript(videoId: string) {
   try {
-    return await fetchTimedtextTranscript(videoId, env);
+    return await fetchTimedtextTranscript(videoId);
   } catch (error) {
     console.warn("[youtube] timedtext path failed:", stringifyError(error));
     console.log("[youtube] falling back to watch page caption extraction");
   }
 
-  return fetchWatchPageTranscript(videoId, env);
+  return fetchWatchPageTranscript(videoId);
 }
 
-async function fetchTimedtextTranscript(videoId: string, env?: ProxyEnv) {
+async function fetchTimedtextTranscript(videoId: string) {
   const listUrl = `https://video.google.com/timedtext?type=list&v=${encodeURIComponent(videoId)}`;
   console.log("[youtube] fetching timedtext track list:", listUrl);
 
-  const listResponse = await fetchText(listUrl, env, "timedtext list", {
+  const listResponse = await fetchText(listUrl, "timedtext list", {
     headers: {
       "accept-language": "zh-CN,zh;q=0.9,en;q=0.8",
       "user-agent": "Mozilla/5.0"
@@ -128,7 +101,7 @@ async function fetchTimedtextTranscript(videoId: string, env?: ProxyEnv) {
   const captionUrl = buildTimedtextCaptionUrl(videoId, track);
   console.log("[youtube] fetching timedtext caption:", redactUrl(captionUrl));
 
-  const captionResponse = await fetchText(captionUrl, env, "timedtext caption", {
+  const captionResponse = await fetchText(captionUrl, "timedtext caption", {
     headers: { "user-agent": "Mozilla/5.0" }
   });
 
@@ -148,11 +121,11 @@ async function fetchTimedtextTranscript(videoId: string, env?: ProxyEnv) {
   return transcript;
 }
 
-async function fetchWatchPageTranscript(videoId: string, env?: ProxyEnv) {
+async function fetchWatchPageTranscript(videoId: string) {
   const watchUrl = `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
   console.log("[youtube] fetching watch page:", watchUrl);
 
-  const response = await fetchText(watchUrl, env, "watch page", {
+  const response = await fetchText(watchUrl, "watch page", {
     headers: {
       "accept-language": "zh-CN,zh;q=0.9,en;q=0.8",
       "user-agent": "Mozilla/5.0"
@@ -208,10 +181,9 @@ async function fetchWatchPageTranscript(videoId: string, env?: ProxyEnv) {
 
 async function fetchText(
   url: string,
-  env: ProxyEnv | undefined,
   label: string,
   init: RequestInit = {}
-): Promise<ProxyTextResponse> {
+): Promise<{ ok: boolean; status: number; statusText: string; text: string }> {
   try {
     const response = await fetch(url, {
       ...init,
@@ -227,24 +199,8 @@ async function fetchText(
     };
   } catch (error) {
     console.warn(`[youtube] direct fetch failed for ${label}:`, stringifyError(error));
-    if (!hasWebshareProxy(env)) throw error;
-
-    console.log(`[youtube] retrying ${label} through Webshare proxy`);
-    return fetchTextViaWebshareProxy(url, env!, normalizeHeaders(init.headers));
+    throw error;
   }
-}
-
-function normalizeHeaders(headers: HeadersInit | undefined) {
-  if (!headers) return {};
-  if (headers instanceof Headers) {
-    const values: Record<string, string> = {};
-    headers.forEach((value, key) => {
-      values[key] = value;
-    });
-    return values;
-  }
-  if (Array.isArray(headers)) return Object.fromEntries(headers);
-  return headers;
 }
 
 type TimedtextTrack = {
@@ -469,40 +425,6 @@ function decodeEntities(value: string) {
     .replace(/&quot;/g, "\"")
     .replace(/&#39;/g, "'")
     .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)));
-}
-
-function fallback(videoId: string | null, message: string): TranscriptResult {
-  if (
-    videoId &&
-    videoId === DOWNLOADED_TRANSCRIPT_VIDEO_ID &&
-    DOWNLOADED_TRANSCRIPT_TEXT.trim()
-  ) {
-    console.log(
-      "[fallback] using downloaded transcript fixture:",
-      videoId,
-      "chars:",
-      DOWNLOADED_TRANSCRIPT_TEXT.length,
-      "segments:",
-      DOWNLOADED_TRANSCRIPT_SEGMENTS.length
-    );
-
-    return {
-      source: "fallback",
-      videoId,
-      transcript: DOWNLOADED_TRANSCRIPT_TEXT,
-      segments: DOWNLOADED_TRANSCRIPT_SEGMENTS,
-      message: `${message} 已使用 Supadata 预下载硬编码字幕：${FALLBACK_VIDEO_URL}`
-    };
-  }
-
-  console.log("[fallback] using short built-in sample transcript");
-
-  return {
-    source: "fallback",
-    videoId,
-    transcript: FALLBACK_TRANSCRIPT,
-    message: `${message} 示例视频：${FALLBACK_VIDEO_URL}`
-  };
 }
 
 function stringifyError(error: unknown) {

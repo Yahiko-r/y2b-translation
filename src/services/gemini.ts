@@ -1,12 +1,6 @@
 export type Env = {
   GEMINI_API_KEY: string;
   GEMINI_MODEL?: string;
-  WEBSHARE_PROXY_HOST?: string;
-  WEBSHARE_PROXY_HOSTS?: string;
-  WEBSHARE_PROXY_PORT?: string;
-  WEBSHARE_PROXY_PORTS?: string;
-  WEBSHARE_PROXY_USERNAME?: string;
-  WEBSHARE_PROXY_PASSWORD?: string;
   SUPADATA_API_KEY?: string;
   TRANSLATION_CHUNK_CHARS?: string;
 };
